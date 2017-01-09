@@ -300,6 +300,33 @@ switch_to_long_mode:
 	ret
 
 
+; Check to see if the CPU supports SSE instructions, and if it does, enable
+; them.
+setup_sse:
+	; Use the `cpuid` instruction to check if the CPU supports SSE instructions
+	mov eax, 0x1
+	cpuid
+	test edx, 1 << 25
+	jz .no_SSE
+
+	; If we reach here, the check successfully passed, so enable SSE
+	; instructions
+	mov eax, cr0
+	and ax, 0xFFFB
+	or ax, 0x2
+	mov cr0, eax
+	mov eax, cr4
+	or ax, 3 << 9
+	mov cr4, eax
+
+	ret
+
+	; Error handling, in case SSE isn't supported
+.no_SSE:
+	mov al, "3"
+	jmp error
+
+
 ; The kernel's main entry point, jumped to by the bootloader.
 global start
 start:
@@ -315,6 +342,9 @@ start:
 	; Setup paging and switch to long mode
 	call setup_page_tables
 	call switch_to_long_mode
+
+	; Enable SSE instructions
+	call setup_sse
 
 	; Load the 64 bit GDT. GRUB provides a 32 bit one for us, but switching to
 	; long mode requires a 64 bit version, so we have to set up another one
@@ -342,7 +372,5 @@ long_mode:
 	extern kernel_main
 	call kernel_main
 
-	; Print `OKAY` to screen
-	mov rax, 0x2f592f412f4b2f4f
-	mov qword [0xb8000], rax
+	; The Rust code returned (which might happen on shutdown), so stop the CPU
 	hlt

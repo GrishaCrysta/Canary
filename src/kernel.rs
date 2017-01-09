@@ -16,7 +16,7 @@ extern crate rlibc;
 // code after a bunch of configuration (like switching to long mode) is done.
 #[no_mangle]
 pub extern fn kernel_main() {
-	let test = (0..3).flat_map(|x| 0..x).zip(0..);
+
 }
 
 #[lang = "eh_personality"]
