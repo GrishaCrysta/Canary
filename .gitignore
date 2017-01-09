@@ -1,5 +1,7 @@
 .DS_Store
 /target
+build
 /.vagrant
 /.idea
 /canary.iml
+*.swp

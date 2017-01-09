@@ -23,6 +23,9 @@ clean:
 run: $(iso)
 	qemu-system-x86_64 -cdrom $(iso)
 
+debug: $(iso)
+	qemu-system-x86_64 -d int -no-reboot -cdrom $(iso)
+
 iso: $(iso)
 
 $(iso): $(kernel) $(grub_cfg)
