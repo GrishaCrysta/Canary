@@ -4,5 +4,8 @@ version = "0.1.0"
 authors = ["Ben Anderson <gravityscore@gmail.com>"]
 
 [lib]
-path = "src/main.rs"
+path = "src/kernel.rs"
 crate-type = ["staticlib"]
+
+[dependencies]
+rlibc = "*"

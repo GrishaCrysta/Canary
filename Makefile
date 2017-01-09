@@ -3,7 +3,9 @@
 #  Kernel Makefile
 #
 
-arch ?= x86-64
+arch ?= x86_64
+target ?= $(arch)-unknown-linux-gnu
+rust_lib := target/$(target)/debug/libcanary.a
 kernel := build/canary-$(arch).bin
 iso := build/canary-$(arch).iso
 
@@ -18,9 +20,9 @@ assembly_object_files := $(patsubst src/arch/$(arch)/%.asm, build/arch/$(arch)/%
 all: $(kernel) $(iso)
 
 clean:
-	rm -r build
+	@rm -r build
 
-run: $(iso)
+run:
 	qemu-system-x86_64 -cdrom $(iso)
 
 debug: $(iso)
@@ -28,16 +30,19 @@ debug: $(iso)
 
 iso: $(iso)
 
-$(iso): $(kernel) $(grub_cfg)
-	mkdir -p build/iso/boot/grub
-	cp $(kernel) build/iso/boot/kernel.bin
-	cp $(grub_cfg) build/iso/boot/grub
-	grub-mkrescue -o $(iso) build/iso
-	rm -r build/iso
+cargo:
+	cargo build --target $(target)
 
-$(kernel): $(assembly_object_files) $(linker_script)
-	ld -n -T $(linker_script) -o $(kernel) $(assembly_object_files)
+$(iso): $(kernel) $(grub_cfg)
+	@mkdir -p build/iso/boot/grub
+	@cp $(kernel) build/iso/boot/kernel.bin
+	@cp $(grub_cfg) build/iso/boot/grub
+	grub-mkrescue -o $(iso) build/iso
+	@rm -r build/iso
+
+$(kernel): cargo $(rust_lib) $(assembly_object_files) $(linker_script)
+	ld -n --gc-sections -T $(linker_script) -o $(kernel) $(assembly_object_files) $(rust_lib)
 
 build/arch/$(arch)/%.o: src/arch/$(arch)/%.asm
-	mkdir -p $(shell dirname $@)
+	@mkdir -p $(shell dirname $@)
 	nasm -felf64 $< -o $@

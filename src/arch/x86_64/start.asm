@@ -5,6 +5,28 @@
 
 bits 32
 
+; Multiboot header, used to identify the kernel as a valid device the bootloader
+; can transfer control to.
+section .multiboot_header
+
+header_start:
+	dd 0xe85250d6                ; Magic number (multiboot 2)
+	dd 0                         ; Architecture 0 (protected mode i386)
+	dd header_end - header_start ; Header length
+
+	; Checksum
+	dd 0x100000000 - (0xe85250d6 + 0 + (header_end - header_start))
+
+	; Insert optional multiboot tags here...
+
+	; Required end tag
+	dw 0    ; Type
+	dw 0    ; Flags
+	dd 8    ; Size
+header_end:
+
+
+; Uninitialised memory
 section .bss
 
 ; Switching to long mode in x86 requires us to enable paging, so for the kernel
@@ -38,6 +60,47 @@ stack_bottom:
 stack_top:
 
 
+; Initialised, read only memory
+section .rodata
+
+; Even though we're using paging for memory management, we still require a 64
+; bit Global Descriptor Table (GDT). GRUB has set up a valid 32 bit one for us,
+; but after switching to long mode we need to create a 64 bit one.
+;
+; Our GDT will have 2 entries - a code segment and data segment. x86 requires
+; the first entry to be a 0 entry.
+gdt_start:
+	; First entry must be a zero entry
+	dq 0
+
+	; Flags, from left to right:
+	; * bit 44: set for code and data segments (descriptor type flag)
+	; * bit 47: set for all valid selectors (present flag)
+	; * bit 41: enable reading/writing (for code/data segments respectively)
+	; * bit 43: set for executable segments (ie. the code segment)
+	; * bit 53: set for 64 bit code segments
+
+	; Code segment
+	;
+	; We reference various sections using their offset into this table in bytes,
+	; so instead of hard-coding values for the code and data segments, we use
+	; nasm to calculate these offsets for us
+.code: equ $ - gdt_start
+	dq (1 << 44) | (1 << 47) | (1 << 41) | (1 << 43) | (1 << 53)
+
+	; Data segment
+.data: equ $ - gdt_start
+	dq (1 << 44) | (1 << 47) | (1 << 41)
+gdt_end:
+
+; To load the GDT, we need to pass the CPU the GDT's length and a pointer to
+; its start in a special structure.
+gdt_info:
+	dw gdt_end - gdt_start - 1 ; Length, minus the first zero entry
+	dq gdt_start ; Pointer to start of the GDT
+
+
+; Assembly code
 section .text
 
 ; Prints an error message and error number to the screen and hangs.
@@ -253,10 +316,29 @@ start:
 	call setup_page_tables
 	call switch_to_long_mode
 
-	; Print `OK` to screen
-	;
-	; We can use these instructions (written in 32 bit mode) even though we're
-	; in 64 bit mode because their corresponding machine code is the same on
-	; both architectures
-	mov dword [0xb8000], 0x2f4b2f4f
+	; Load the 64 bit GDT. GRUB provides a 32 bit one for us, but switching to
+	; long mode requires a 64 bit version, so we have to set up another one
+	lgdt [gdt_info]
+
+	; Loading a new GDT doesn't reset all the selector registers used by the
+	; CPU - we have to do this manually
+	mov ax, gdt_start.data
+	mov ss, ax
+	mov ds, ax
+	mov es, ax
+
+	; Finally, we need to update the code selector register with its new value
+	; from the GDT table. We can't modify it through `mov`, we need to use a
+	; far jump or far return
+	jmp gdt_start.code:long_mode
+
+
+; 64 bit code we can run after we've switched to long mode.
+bits 64
+
+; Called through a far jump after switching to long mode.
+long_mode:
+	; Print `OKAY` to screen
+	mov rax, 0x2f592f412f4b2f4f
+	mov qword [0xb8000], rax
 	hlt
