@@ -338,6 +338,10 @@ bits 64
 
 ; Called through a far jump after switching to long mode.
 long_mode:
+	; Call into the Rust code's main function
+	extern kernel_main
+	call kernel_main
+
 	; Print `OKAY` to screen
 	mov rax, 0x2f592f412f4b2f4f
 	mov qword [0xb8000], rax

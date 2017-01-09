@@ -7,5 +7,19 @@ authors = ["Ben Anderson <gravityscore@gmail.com>"]
 path = "src/kernel.rs"
 crate-type = ["staticlib"]
 
+# The Rust compiler inserts what are called "panic landing pads", which call the
+# destructors for stack-allocated objects when a `panic!` is triggered, so that
+# allocated memory is still freed when the stack unwinds.
+#
+# This unfortunately requires a specific gcc library, which we don't have. So
+# tell the compiler to not insert landing pads in code, and instead just abort
+# the program without calling destructors. Any allocated memory will be freed
+# by the OS when the process terminates, so it doesn't really make a difference,
+# but the landing pad system is "neater".
+[profile.dev]
+panic = "abort"
+[profile.release]
+panic = "abort"
+
 [dependencies]
 rlibc = "*"
