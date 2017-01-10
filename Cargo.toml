@@ -7,6 +7,11 @@ authors = ["Ben Anderson <gravityscore@gmail.com>"]
 path = "src/kernel.rs"
 crate-type = ["staticlib"]
 
+[dependencies]
+rlibc = "*"
+volatile = "*"
+spin = "*"
+
 # The Rust compiler inserts what are called "panic landing pads", which call the
 # destructors for stack-allocated objects when a `panic!` is triggered, so that
 # allocated memory is still freed when the stack unwinds.
@@ -20,6 +25,3 @@ crate-type = ["staticlib"]
 panic = "abort"
 [profile.release]
 panic = "abort"
-
-[dependencies]
-rlibc = "*"
