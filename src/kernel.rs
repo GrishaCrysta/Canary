@@ -26,18 +26,27 @@ extern crate spin;
 // them ourselves).
 extern crate rlibc;
 
-#[macro_use]
-mod drivers;
+#[macro_use] mod drivers;
+mod memory;
+mod multiboot;
 
 use drivers::vga;
+use multiboot::Multiboot;
+
+use core::fmt::Arguments;
 
 // This is the main Rust entry point for the kernel, called from the `start.asm`
 // code after a bunch of configuration (like switching to long mode) is done.
+//
+// The assembly code calling this function passes a pointer to the multiboot
+// information struct as the first argument.
 #[no_mangle]
-pub extern fn kernel_main() {
+pub extern fn kernel_main(multiboot_ptr: usize) {
 	// Lock the VGA writer in a block so that it will unlock the mutex once
 	// the block ends
 	{
+		// Clear the screen and set the cursor position to the origin, since the
+		// bootloader would've printed a bunch of messages before us
 		let mut writer = vga::WRITER.lock();
 		writer.clear_screen();
 		writer.set_cursor(0, 0);
@@ -45,6 +54,13 @@ pub extern fn kernel_main() {
 
 	// Print a hello message
 	println!("Hello, world!");
+
+	// Print all available memory areas
+	let info = Multiboot::new(multiboot_ptr as *const u8);
+	println!("memory areas:");
+	for area in info.memory_areas() {
+		println!("  base {:#x}, size {:#x}", area.base, area.size);
+	}
 
 	// Don't return back to assembly
 	loop {}
@@ -59,7 +75,11 @@ extern fn eh_personality() {
 // print an error message and not return.
 #[lang = "panic_fmt"]
 #[no_mangle]
-pub extern fn panic_fmt() -> ! {
+pub extern fn panic_fmt(fmt: Arguments, file: &'static str, line: u32) -> ! {
+	// Print the file, line number, and provided format arguments with the panic
+	println!("\n\npanic in file {} on line {}:", file, line);
+	println!("  {}", fmt);
+
 	// Make sure this function doesn't return (required by the ! return type)
 	loop {}
 }

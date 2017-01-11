@@ -56,7 +56,7 @@ p2_table:
 ; overflow and several CPU feature checks (since `eflags` can only be pushed to
 ; the stack)
 stack_bottom:
-	resb 64
+	resb 4096
 stack_top:
 
 
@@ -333,6 +333,13 @@ start:
 	; Update the stack pointer to point to our empty kernel stack
 	; Use the `stack_top` since the stack has to grow downwards
 	mov esp, stack_top
+
+	; We need to use the multiboot information struct (in `ebx`) later in the
+	; kernel to find out some information about where our kernel is located in
+	; memory. We're going to pass a pointer to it as the first argument to the
+	; `kernel_main` Rust function, which must be in `rdi`, so move the pointer
+	; from `ebx` to `edi`
+	mov edi, ebx
 
 	; Ensure various CPU features are supported
 	call check_multiboot
