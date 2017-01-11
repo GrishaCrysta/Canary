@@ -134,10 +134,45 @@ impl Multiboot {
 }
 
 /// A valid memory area.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MemoryArea {
-	pub base: u64,
-	pub size: u64,
+	// These fields match the size and type of each field in a memory map entry
+	// as specified in the multiboot specification
+	base_addr: u64,
+	length: u64,
+	kind: u32,
+	reserved: u32,
 }
+
+/// The type of a memory area.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MemoryAreaType {
+	Usable,
+	Unusable,
+}
+
+impl MemoryArea {
+	/// Returns the address of the start of the memory area.
+	pub fn base(&self) -> u64 {
+		self.base_addr
+	}
+
+	/// Returns the size of the memory address in bytes.
+	pub fn size(&self) -> u64 {
+		self.length
+	}
+
+	/// Returns the type of the memory area. At this stage, only a distinction
+	/// bewteen usable and unusable memory areas is made.
+	pub fn kind(&self) -> MemoryAreaType {
+		if self.kind == 1 {
+			MemoryAreaType::Usable
+		} else {
+			MemoryAreaType::Unusable
+		}
+	}
+}
+
 
 /// An iterator over all valid memory areas.
 ///
@@ -170,47 +205,38 @@ impl MemoryAreas {
 			reader.read_u32(); // entry version, always 0
 		}
 
+		// Calculate the number of entries in the memory map
+		// Subtract 16 from the total tag size to exclude the header fields (4
+		// u32s)
+		let entries_size = total_size - 16;
+		let entry_count = entries_size / entry_size;
+
 		MemoryAreas {
 			reader: reader,
 			entry_size: entry_size,
-			entry_count: ((total_size - 16) / entry_size) as usize,
+			entry_count: entry_count as usize,
 			current_entry: 0,
 		}
 	}
 }
 
 impl Iterator for MemoryAreas {
-	type Item = MemoryArea;
+	type Item = &'static MemoryArea;
 
-	fn next(&mut self) -> Option<MemoryArea> {
+	fn next(&mut self) -> Option<&'static MemoryArea> {
 		// Check if we've read all entries
 		if self.current_entry >= self.entry_count {
 			return None;
 		}
+
+		// Increment the entry counter to move to the next entry
 		self.current_entry += 1;
 
-		// Read the memory map entry
-		let base; let size; let kind;
-		unsafe {
-			base = self.reader.read_u64(); // base address
-			size = self.reader.read_u64(); // size
-			kind = self.reader.read_u32(); // type
-			self.reader.read_u32(); // reserved
+		// Skip over the entry in the reader
+		let entry_ptr = self.reader.cursor;
+		unsafe { self.reader.skip(self.entry_size as usize) };
 
-			// Skip to the end of the entry
-			self.reader.skip(self.entry_size as usize - 24);
-		}
-
-		// Only produce a valid memory area if `kind` is 1 (ie. the given area
-		// of memory is available for us to use)
-		if kind == 1 {
-			Some(MemoryArea {
-				base: base,
-				size: size,
-			})
-		} else {
-			// Read the next memory area
-			self.next()
-		}
+		// Return a pointer to the entry
+		Some(unsafe { &*(entry_ptr as *const MemoryArea) })
 	}
 }

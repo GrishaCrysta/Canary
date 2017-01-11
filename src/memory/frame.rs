@@ -3,6 +3,8 @@
 //  Physical Memory Management (Frames)
 //
 
+use multiboot::MemoryAreas;
+
 /// The size of a single frame, in bytes. This is a physical constant of the
 /// architecture.
 const FRAME_SIZE: usize = 4096;
@@ -46,4 +48,9 @@ pub trait FrameAllocator {
 pub struct BumpAllocator {
 	/// The next free frame to return when `allocate` is called.
 	next_free_frame: Frame,
+
+	/// An iterator over all valid memory areas, determined from the multiboot
+	/// information struct. These areas exclude any memory mapped devices such
+	/// as VGA.
+	memory_areas: MemoryAreas,
 }

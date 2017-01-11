@@ -31,7 +31,7 @@ mod memory;
 mod multiboot;
 
 use drivers::vga;
-use multiboot::Multiboot;
+use multiboot::{Multiboot, MemoryAreaType};
 
 use core::fmt::Arguments;
 
@@ -55,11 +55,13 @@ pub extern fn kernel_main(multiboot_ptr: usize) {
 	// Print a hello message
 	println!("Hello, world!");
 
-	// Print all available memory areas
+	// Print all usable memory areas
 	let info = Multiboot::new(multiboot_ptr as *const u8);
 	println!("memory areas:");
 	for area in info.memory_areas() {
-		println!("  base {:#x}, size {:#x}", area.base, area.size);
+		if area.kind() == MemoryAreaType::Usable {
+			println!("  base {:#x}, size {:#x}", area.base(), area.size());
+		}
 	}
 
 	// Don't return back to assembly
