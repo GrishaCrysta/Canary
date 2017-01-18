@@ -25,7 +25,7 @@ clean:
 run:
 	qemu-system-x86_64 -cdrom $(iso)
 
-debug: $(iso)
+debug:
 	qemu-system-x86_64 -d int -no-reboot -cdrom $(iso)
 
 iso: $(iso)

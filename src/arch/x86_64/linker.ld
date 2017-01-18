@@ -10,12 +10,12 @@ SECTIONS {
 	/* Start the kernel at 1 MB since a lot of hardware devices and bootloader
 	 * information is mapped to memory below 1 MB (eg. the VGA memory at
 	 * 0xb8000) */
-    . = 1M;
+	. = 1M;
 
-    .boot : {
-        /* Ensure that the multiboot header is at the beginning */
-        KEEP(*(.multiboot_header))
-    }
+	.boot : {
+		/* Ensure that the multiboot header is at the beginning */
+		KEEP(*(.multiboot_header))
+	}
 
 	.text : {
 		/* Merge all .text.* subsections into the .text section */

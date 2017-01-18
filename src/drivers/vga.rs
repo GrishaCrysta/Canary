@@ -230,6 +230,17 @@ impl fmt::Write for Writer {
 	}
 }
 
+/// Initialise the VGA module.
+///
+/// Clears the screen and moves the cursor to the origin.
+pub fn init() {
+	// Clear the screen and set the cursor position to the origin, since the
+	// bootloader would've printed a bunch of messages before us
+	let mut writer = WRITER.lock();
+	writer.clear_screen();
+	writer.set_cursor(0, 0);
+}
+
 /// Prints a series of format arguments to the terminal.
 pub fn print(args: fmt::Arguments) {
 	// This is required (instead of just inlining this in the `print!` macro) to

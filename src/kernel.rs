@@ -3,6 +3,7 @@
 //  Kernel Main
 //
 
+#![allow(dead_code)]
 #![feature(lang_items, unique, const_fn)]
 #![no_std]
 
@@ -31,7 +32,7 @@ mod memory;
 mod multiboot;
 
 use drivers::vga;
-use multiboot::{Multiboot, MemoryAreaType};
+use multiboot::{MultibootInfo, Header, MemoryAreaType};
 
 use core::fmt::Arguments;
 
@@ -42,26 +43,22 @@ use core::fmt::Arguments;
 // information struct as the first argument.
 #[no_mangle]
 pub extern fn kernel_main(multiboot_ptr: usize) {
-	// Lock the VGA writer in a block so that it will unlock the mutex once
-	// the block ends
-	{
-		// Clear the screen and set the cursor position to the origin, since the
-		// bootloader would've printed a bunch of messages before us
-		let mut writer = vga::WRITER.lock();
-		writer.clear_screen();
-		writer.set_cursor(0, 0);
-	}
-
-	// Print a hello message
-	println!("Hello, world!");
+	// Initialisation
+	vga::init();
 
 	// Print all usable memory areas
-	let info = Multiboot::new(multiboot_ptr as *const u8);
+	let info = unsafe { MultibootInfo::new(multiboot_ptr as *const Header) };
 	println!("memory areas:");
 	for area in info.memory_areas() {
 		if area.kind() == MemoryAreaType::Usable {
-			println!("  base {:#x}, size {:#x}", area.base(), area.size());
+			println!("  base {:#x}, size {:#x}", area.start(), area.size());
 		}
+	}
+
+	// Print all kernel sections
+	println!("kernel sections:");
+	for section in info.sections() {
+		println!("  base {:#x}, size {:#x}, flags {:#x}", section.start(), section.size(), section.flags);
 	}
 
 	// Don't return back to assembly

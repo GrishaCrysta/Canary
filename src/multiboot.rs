@@ -1,145 +1,169 @@
 
 //
-//  Multiboot Information Struct Parsing
+//  MultibootInfo Information Struct Parsing
 //
 
 use core::ptr;
 
-/// A simple byte reader, which maintains a cursor position within a piece of
-/// memory, with utilities to advance the cursor and read integers of various
-/// sizes.
-struct ByteReader {
-	cursor: *const u8,
+/// The multiboot struct header.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
+pub struct Header {
+	total_size: u32,
+	reserved: u32,
+	first_tag: TagHeader,
 }
 
-impl ByteReader {
-	/// Returns a new byte reader starting at the given location in memory.
-	fn new(start: *const u8) -> ByteReader {
-		ByteReader {
-			cursor: start,
-		}
-	}
-
-	/// Moves the cursor forward by a certain number of bytes.
-	unsafe fn skip(&mut self, amount: usize) {
-		self.cursor = self.cursor.offset(amount as isize);
-	}
-
-	/// Aligns the cursor to the next byte boundary of the given size. `align`
-	/// must be a power of 2.
-	///
-	/// For example, if `align` is 8, then this moves the cursor forward such
-	/// that it lies on the start of an 8 byte boundary.
-	unsafe fn align(&mut self, align: usize) {
-		let cursor = self.cursor as usize;
-		let aligned = (cursor + align - 1) & !(align - 1);
-		self.cursor = aligned as *const u8;
-	}
-
-	/// Reads a u8 value from memory and advances the cursor by 1 byte.
-	unsafe fn read_u8(&mut self) -> u8 {
-		let value = *self.cursor;
-		self.skip(1);
-		value
-	}
-
-	/// Reads a u32 value from memory, advancing the cursor by 4 bytes.
-	///
-	/// Assumes we're allowed to read the memory (ie. won't generate a page
-	/// fault), and that the memory contains something valid and useful.
-	unsafe fn read_u32(&mut self) -> u32 {
-		// Since we're on x86, and all x86 platforms are little-endian, the
-		// u32 value is represented in the multiboot structure as little-endian
-		// (this is also stated in the multiboot specification)
-		self.read_u8() as u32 | (self.read_u8() as u32) << 8 |
-			(self.read_u8() as u32) << 16 | (self.read_u8() as u32) << 24
-	}
-
-	/// Reads a u64 value from memory, advancing the cursor by 8 bytes.
-	unsafe fn read_u64(&mut self) -> u64 {
-		// Use a loop and let the compiler unroll it during optimisation
-		// I'm too lazy to write out all 8 or statements explicitly
-		let mut result = 0;
-		for i in 0 .. 8 {
-			result |= (self.read_u8() as u64) << (i << 3);
-		}
-		result
-	}
+/// The header that precedes a tag within the multiboot struct.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
+pub struct TagHeader {
+	kind: u32,
+	size: u32,
 }
 
 /// The multiboot information struct.
-pub struct Multiboot {
-	/// A pointer to the start of the multiboot structure.
-	start: *const u8,
-
-	// Pointers to the start of relevant tags.
-	memory_map: *const u8,
+pub struct MultibootInfo {
+	header: &'static Header,
+	memory_map_tag: &'static MemoryMapTag,
+	sections_tag: &'static SectionsTag,
 }
 
-impl Multiboot {
+impl MultibootInfo {
 	/// Create a new multiboot information struct from a pointer to the start
 	/// of one.
-	pub fn new(start: *const u8) -> Multiboot {
-		let mut info = Multiboot {
-			start: start,
-			memory_map: ptr::null(),
-		};
+	pub unsafe fn new(start: *const Header) -> MultibootInfo {
+		let header = &*start;
 
-		// As long as the given pointer is a pointer to a valid multiboot
-		// information struct (an invariant of this function), then this parse
-		// function is safe
-		unsafe { info.parse() };
-		info
-	}
+		// Iterate over each tag header, looking for the memory map and sections
+		// tags
+		let mut memory_map_tag = ptr::null();
+		let mut sections_tag = ptr::null();
+		let mut tag = &header.first_tag as *const TagHeader;
 
-	/// Parse the start of relevant tags from a pointer to a multiboot
-	/// information struct.
-	unsafe fn parse(&mut self) {
-		// Read the starting two fields of the struct
-		let mut reader = ByteReader::new(self.start);
-		reader.read_u32(); // total size
-		reader.read_u32(); // reserved
-
-		// Iterate over each tag
-		loop {
-			// Read the tag's type
-			let cursor = reader.cursor;
-			let kind = reader.read_u32();
-			let size = reader.read_u32();
-
-			// Skip over the tag, subtracting 8 for the 2 u32s we've already
-			// read
-			reader.skip(size as usize - 8);
-
-			// Each tag is aligned on an 8 byte boundary, so align the cursor
-			// for the next tag to be read
-			reader.align(8);
-
-			// Depending on the tag's type, set the relevant pointer
-			match kind {
-				6 => self.memory_map = cursor,
-				// 9 => self.elf_symbols = cursor,
-
-				// Stop when we've reached the end of all tags
-				0 => break,
+		// The last tag in the list has a type of 0, so stop parsing tags when
+		// we reach it
+		while (*tag).kind != 0 {
+			// Check if we're interested in this tag
+			match (*tag).kind {
+				6 => memory_map_tag = tag as *const MemoryMapTag,
+				9 => sections_tag = tag as *const SectionsTag,
 				_ => {},
 			}
+
+			// Move to the next tag by skipping over the size of the tag in
+			// bytes
+			let next_ptr = tag as usize + (*tag).size as usize;
+
+			// Each tag within the multiboot information struct is 8 byte
+			// aligned (ie. starts on an 8 byte boundary), so align the `tag`
+			// pointer to 8 bytes
+			let alignment = 8;
+			let aligned_ptr = (next_ptr + alignment - 1) & !(alignment - 1);
+
+			// Update the tag pointer
+			tag = aligned_ptr as *const TagHeader;
+		}
+
+		MultibootInfo {
+			header: header,
+			memory_map_tag: &*memory_map_tag,
+			sections_tag: &*sections_tag,
 		}
 	}
 
-	/// Return an iterator over all valid memory areas.
-	pub fn memory_areas(&self) -> MemoryAreas {
-		MemoryAreas::new(ByteReader::new(self.memory_map))
+	/// The address of the start of the multiboot structure.
+	pub fn start(&self) -> usize {
+		self.header as *const _ as usize
 	}
+
+	/// The address of the end of the multiboot structure.
+	pub fn size(&self) -> usize {
+		self.header.total_size as usize
+	}
+
+	/// Return an iterator over all valid memory areas.
+	pub fn memory_areas(&self) -> EntryIterator<MemoryArea> {
+		// Calculate a pointer to the last entry
+		let tag_ptr = self.memory_map_tag as *const MemoryMapTag as usize;
+		let tag_size = self.memory_map_tag.tag_size as usize;
+		let entry_size = self.memory_map_tag.entry_size as usize;
+		let last_entry = tag_ptr + tag_size - entry_size;
+
+		EntryIterator {
+			current_entry: &self.memory_map_tag.first_area,
+			last_entry: last_entry as *const MemoryArea,
+			entry_size: entry_size,
+		}
+	}
+
+	/// Return an iterator over all ELF sections in the kernel executable.
+	pub fn sections(&self) -> EntryIterator<Section> {
+		// Calculate a pointer to the last entry
+		let tag_ptr = self.sections_tag as *const SectionsTag as usize;
+		let tag_size = self.sections_tag.tag_size as usize;
+		let entry_size = self.sections_tag.entry_size as usize;
+		let last_entry = tag_ptr + tag_size - entry_size;
+
+		EntryIterator {
+			current_entry: &self.sections_tag.first_section,
+			last_entry: last_entry as *const Section,
+			entry_size: entry_size,
+		}
+	}
+}
+
+
+/// An iterator over a series of entries in a list within the multiboot
+/// information struct.
+#[derive(Clone)]
+pub struct EntryIterator<T: 'static> {
+	current_entry: *const T,
+	last_entry: *const T,
+	entry_size: usize,
+}
+
+impl<T: 'static> Iterator for EntryIterator<T> {
+	type Item = &'static T;
+
+	fn next(&mut self) -> Option<&'static T> {
+		// Check if we've gone past the last entry
+		if self.current_entry > self.last_entry {
+			return None;
+		}
+
+		// Save the current entry
+		let entry = self.current_entry;
+
+		// Advance the entry pointer to the next entry
+		let next_ptr = self.current_entry as usize + self.entry_size;
+		self.current_entry = next_ptr as *const T;
+
+		// Return the current entry
+		Some(unsafe { &*entry })
+	}
+}
+
+
+/// The memory map tag within the multiboot struct.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
+pub struct MemoryMapTag {
+	tag_type: u32,
+	tag_size: u32,
+	entry_size: u32,
+	version: u32,
+	first_area: MemoryArea,
 }
 
 /// A valid memory area.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
 pub struct MemoryArea {
 	// These fields match the size and type of each field in a memory map entry
 	// as specified in the multiboot specification
-	base_addr: u64,
-	length: u64,
+	address: usize,
+	length: usize,
 	kind: u32,
 	reserved: u32,
 }
@@ -153,12 +177,12 @@ pub enum MemoryAreaType {
 
 impl MemoryArea {
 	/// Returns the address of the start of the memory area.
-	pub fn base(&self) -> u64 {
-		self.base_addr
+	pub fn start(&self) -> usize {
+		self.address
 	}
 
 	/// Returns the size of the memory address in bytes.
-	pub fn size(&self) -> u64 {
+	pub fn size(&self) -> usize {
 		self.length
 	}
 
@@ -174,69 +198,44 @@ impl MemoryArea {
 }
 
 
-/// An iterator over all valid memory areas.
-///
-/// These areas exclude any memory mapped devices (such as VGA), but include
-/// the loaded kernel and multiboot information struct.
-pub struct MemoryAreas {
-	reader: ByteReader,
-
-	/// The size of each entry in the memory map, given in the memory map tag
-	/// header, used for compatability with future multiboot versions.
+/// The tag containing all sections.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// Using `repr(C)` would add unwanted padding before `first_section`
+#[repr(packed)]
+pub struct SectionsTag {
+	tag_type: u32,
+	tag_size: u32,
+	sections_count: u32,
 	entry_size: u32,
-
-	/// The number of entries in the memory map.
-	entry_count: usize,
-
-	/// The index of the current entry that we're up to.
-	current_entry: usize,
+	string_table: u32,
+	first_section: Section,
 }
 
-impl MemoryAreas {
-	/// Create a new memory area iterator using a byte reader that points to the
-	/// start of the memory map tag in the multiboot information struct.
-	fn new(mut reader: ByteReader) -> MemoryAreas {
-		// Read the tag header
-		let total_size; let entry_size;
-		unsafe {
-			reader.read_u32(); // type
-			total_size = reader.read_u32(); // size
-			entry_size = reader.read_u32(); // entry size
-			reader.read_u32(); // entry version, always 0
-		}
+/// A section header within an ELF file.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
+pub struct Section {
+	name_index: u32,
+	kind: u32,
+	pub flags: usize,
+	address: usize,
+	offset: usize,
+	size: usize,
+	link: u32,
+	info: u32,
+	address_alignment: usize,
+	entry_size: usize,
+}
 
-		// Calculate the number of entries in the memory map
-		// Subtract 16 from the total tag size to exclude the header fields (4
-		// u32s)
-		let entries_size = total_size - 16;
-		let entry_count = entries_size / entry_size;
-
-		MemoryAreas {
-			reader: reader,
-			entry_size: entry_size,
-			entry_count: entry_count as usize,
-			current_entry: 0,
-		}
+impl Section {
+	/// Returns the physical start address of the code within the section in
+	/// memory.
+	pub fn start(&self) -> usize {
+		self.address
 	}
-}
 
-impl Iterator for MemoryAreas {
-	type Item = &'static MemoryArea;
-
-	fn next(&mut self) -> Option<&'static MemoryArea> {
-		// Check if we've read all entries
-		if self.current_entry >= self.entry_count {
-			return None;
-		}
-
-		// Increment the entry counter to move to the next entry
-		self.current_entry += 1;
-
-		// Skip over the entry in the reader
-		let entry_ptr = self.reader.cursor;
-		unsafe { self.reader.skip(self.entry_size as usize) };
-
-		// Return a pointer to the entry
-		Some(unsafe { &*(entry_ptr as *const MemoryArea) })
+	/// Returns the size of the section in bytes.
+	pub fn size(&self) -> usize {
+		self.size
 	}
 }
