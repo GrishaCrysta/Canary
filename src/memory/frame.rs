@@ -5,12 +5,17 @@
 
 use multiboot::{MultibootInfo, EntryIterator, MemoryArea, Section};
 
+/// To make the following code more verbose, we distinguish between physical
+/// and virtual memory addresses (despite both being represented by the same
+/// underlying integer type).
+pub type PhysicalAddr = usize;
+
 /// The size of a single frame, in bytes. This is a physical constant of the
 /// architecture.
-const FRAME_SIZE: usize = 4096;
+pub const FRAME_SIZE: usize = 4096;
 
-/// A section of size 4096 bytes of physical memory, called a Frame.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// A 4096 byte section of physical memory, called a frame.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Frame {
 	/// Each frame is identified by an ID number, which is simply its index in
 	/// memory, starting at the very first frame (ie. its starting address
@@ -20,10 +25,27 @@ pub struct Frame {
 
 impl Frame {
 	/// Create a new frame that contains the given address.
-	fn containing(address: usize) -> Frame {
+	pub fn containing(address: PhysicalAddr) -> Frame {
 		Frame {
 			id: address / FRAME_SIZE,
 		}
+	}
+
+	/// A private function to clone a frame.
+	///
+	/// We don't want to publicly implement the Clone trait because the only
+	/// way we should be able to get a frame is through allocating one with a
+	/// frame allocator. This uses Rust's ownership model to prevent us from
+	/// being able to free a frame twice.
+	fn clone(&self) -> Frame {
+		Frame {
+			id: self.id,
+		}
+	}
+
+	/// Returns the starting address of this frame.
+	pub fn start(&self) -> PhysicalAddr {
+		self.id * FRAME_SIZE
 	}
 }
 
@@ -60,8 +82,8 @@ impl Region {
 	}
 
 	/// Returns true if this region contains another frame.
-	fn contains(&self, frame: Frame) -> bool {
-		frame >= self.start && frame <= self.end
+	fn contains(&self, frame: &Frame) -> bool {
+		*frame >= self.start && *frame <= self.end
 	}
 }
 
@@ -160,7 +182,7 @@ impl BumpAllocator {
 		// Iterate over all invalid regions
 		for region in self.invalid_regions.iter() {
 			// Check if the region contains the next free frame
-			if region.contains(self.next_free_frame) {
+			if region.contains(&self.next_free_frame) {
 				// Use the frame after the end of the invalid region
 				self.next_free_frame = Frame {
 					id: region.end.id + 1,
@@ -196,7 +218,7 @@ impl FrameAllocator for BumpAllocator {
 				self.allocate()
 			} else {
 				// If we reach here, the current frame is valid, so use it
-				let frame = self.next_free_frame;
+				let frame = self.next_free_frame.clone();
 				self.next_free_frame.id += 1;
 				Some(frame)
 			}

@@ -231,17 +231,24 @@ setup_page_tables:
 	; This means all 3 page tables are already valid (containing all 0s), but
 	; aren't very useful to us yet because they don't actually do anything
 
+	; Map the last entry in the P4 table to the P4 table itself (recursive
+	; mapping). This lets us modify the page tables themselves by exploiting
+	; the hardware's address translation process.
+	;
+	; See http://os.phil-opp.com/modifying-page-tables.html#page-table-entries
+	; for a full list of page table entry flags
+	mov eax, p4_table
+	or eax, 11b ; flags: writable, present
+	mov [p4_table + 511 * 8], eax
+
 	; Map the first entry in the P4 table to the P3 table
-	; Set the lower 2 bits to indicate the P3 page table is present in memory
-	; and is writable
 	mov eax, p3_table
-	or eax, 11b
+	or eax, 11b ; flags: writable, present
 	mov [p4_table], eax
 
 	; Map the first entry in the P3 table to the P2 table
-	; Again, set the present and writable flags
 	mov eax, p2_table
-	or eax, 11b
+	or eax, 11b ; flags: writable, present
 	mov [p3_table], eax
 
 	; Use a loop to map the `ecx`th entry in the P2 table to a region of memory
