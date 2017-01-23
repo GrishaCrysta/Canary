@@ -4,16 +4,16 @@
 #
 
 arch ?= x86_64
-target ?= $(arch)-unknown-linux-gnu
+target ?= $(arch)-canary
 rust_lib := target/$(target)/debug/libcanary.a
 kernel := build/canary-$(arch).bin
 iso := build/canary-$(arch).iso
 
-linker_script := src/arch/$(arch)/linker.ld
-grub_cfg := src/arch/$(arch)/grub.cfg
+linker_script := src/cfg/link.ld
+grub_cfg := src/cfg/grub.cfg
 
-assembly_source_files := $(wildcard src/arch/$(arch)/*.asm)
-assembly_object_files := $(patsubst src/arch/$(arch)/%.asm, build/arch/$(arch)/%.o, $(assembly_source_files))
+assembly_source_files := $(wildcard src/asm/*.asm)
+assembly_object_files := $(patsubst src/asm/%.asm, build/asm/%.o, $(assembly_source_files))
 
 .PHONY: all clean run iso
 
@@ -30,8 +30,8 @@ debug:
 
 iso: $(iso)
 
-cargo:
-	cargo build --target $(target)
+xargo:
+	xargo build --target $(target)
 
 $(iso): $(kernel) $(grub_cfg)
 	@mkdir -p build/iso/boot/grub
@@ -40,9 +40,9 @@ $(iso): $(kernel) $(grub_cfg)
 	grub-mkrescue -o $(iso) build/iso
 	@rm -r build/iso
 
-$(kernel): cargo $(rust_lib) $(assembly_object_files) $(linker_script)
+$(kernel): xargo $(rust_lib) $(assembly_object_files) $(linker_script)
 	ld -n --gc-sections -T $(linker_script) -o $(kernel) $(assembly_object_files) $(rust_lib)
 
-build/arch/$(arch)/%.o: src/arch/$(arch)/%.asm
+build/asm/%.o: src/asm/%.asm
 	@mkdir -p $(shell dirname $@)
 	nasm -felf64 $< -o $@

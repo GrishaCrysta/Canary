@@ -1,9 +1,8 @@
 
 //
-//  Kernel Main
+//  Kernel Main Entry Point
 //
 
-#![allow(dead_code)]
 #![feature(lang_items, unique, const_fn)]
 #![no_std]
 
@@ -27,14 +26,7 @@ extern crate spin;
 // them ourselves).
 extern crate rlibc;
 
-#[macro_use] mod drivers;
-mod memory;
-mod multiboot;
-
-use drivers::vga;
-use multiboot::{MultibootInfo, Header, MemoryAreaType};
-
-use core::fmt::Arguments;
+#[macro_use] mod driver;
 
 // This is the main Rust entry point for the kernel, called from the `start.asm`
 // code after a bunch of configuration (like switching to long mode) is done.
@@ -43,23 +35,8 @@ use core::fmt::Arguments;
 // information struct as the first argument.
 #[no_mangle]
 pub extern fn kernel_main(multiboot_ptr: usize) {
-	// Initialisation
-	vga::init();
-
-	// Print all usable memory areas
-	let info = unsafe { MultibootInfo::new(multiboot_ptr as *const Header) };
-	println!("memory areas:");
-	for area in info.memory_areas() {
-		if area.kind() == MemoryAreaType::Usable {
-			println!("  base {:#x}, size {:#x}", area.start(), area.size());
-		}
-	}
-
-	// Print all kernel sections
-	println!("kernel sections:");
-	for section in info.sections() {
-		println!("  base {:#x}, size {:#x}, flags {:#x}", section.start(), section.size(), section.flags);
-	}
+	driver::vga::init();
+	println!("HI");
 
 	// Don't return back to assembly
 	loop {}
@@ -74,23 +51,7 @@ extern fn eh_personality() {
 // print an error message and not return.
 #[lang = "panic_fmt"]
 #[no_mangle]
-pub extern fn panic_fmt(fmt: Arguments, file: &'static str, line: u32) -> ! {
-	// Print the file, line number, and provided format arguments with the panic
-	println!("\n\npanic in file {} on line {}:", file, line);
-	println!("  {}", fmt);
-
+pub extern fn panic_fmt() -> ! {
 	// Make sure this function doesn't return (required by the ! return type)
 	loop {}
-}
-
-// Although we disabled unwinding upon `panic!` calls in our kernel (so the
-// compiler doesn't generate landing pads, which require a special gcc library),
-// the `core` crate still has undefined references to `_Unwind_Resume`. To
-// solve this, we just provide a dummy implementation for now.
-//
-// TODO: instead, recompile the `core` crate with unwinding disabled
-#[allow(non_snake_case)]
-#[no_mangle]
-pub extern "C" fn _Unwind_Resume() -> ! {
-    loop {}
 }

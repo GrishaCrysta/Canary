@@ -13,7 +13,7 @@ Canary's design goals are:
 
 You can download the latest `.iso` file from the [releases](https://github.com/GravityScore/Canary/releases) page and run it using [VirtualBox](https://www.virtualbox.org/wiki/Downloads) or [QEMU](http://wiki.qemu.org/Main_Page).
 
-For example, using QEMU on a 64 bit system:
+For example, using QEMU on an `x86-64` system:
 
 ```bash
 $ qemu-system-x86_64 -cdrom canary-x86_64.iso
@@ -25,10 +25,11 @@ Canary can only be built on 64 bit Linux at the moment. If you're not on Linux, 
 
 ### Linux
 
-Firstly, install the required dependencies:
+Building Canary requires the following dependencies (keep reading to find out how to install them):
 
 * **[NASM](http://www.nasm.us/):** an x86 assembler.
 * **[Nightly Rust](https://doc.rust-lang.org/book/nightly-rust.html):** a nightly build of the Rust compiler is needed in order to use some unstable features required for OS development. We recommend [Rustup](https://rustup.rs/) to manage various Rust installations.
+* **[Xargo](https://github.com/japaric/xargo):** manages cross compiling the `core` and `std` crates for Rust.
 * **[GRUB Bootloader](https://www.gnu.org/software/grub/):** a multiboot compliant bootloader used by Canary. The `grub-mkrescue` command is used by Canary's build system to generate the `.iso` file.
 
 You can use this `apt-get` command to install NASM:
@@ -37,10 +38,17 @@ You can use this `apt-get` command to install NASM:
 $ sudo apt-get install nasm
 ```
 
-And you can use this command to install Rustup (given on the [Rustup homepage](https://rustup.rs/)):
+You can use this command to install Rustup (given on the [Rustup homepage](https://rustup.rs/)):
 
 ```bash
 $ curl https://sh.rustup.rs -sSf | sh
+```
+
+Use this command to install `xargo`:
+
+```bash
+$ cargo install xargo
+$ rustup component add rust-src
 ```
 
 Next, clone this repository:
@@ -113,6 +121,13 @@ And the nightly Rust compiler using:
 
 ```bash
 $ rustup override set nightly
+```
+
+And `xargo` with:
+
+```bash
+$ cargo install xargo
+$ rustup component add rust-src
 ```
 
 Then use the Makefile to build Canary:

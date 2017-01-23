@@ -5,9 +5,24 @@
 
 bits 32
 
-; Multiboot header, used to identify the kernel as a valid device the bootloader
-; can transfer control to.
-section .multiboot_header
+; The following macro converts a virtual address to a physical address. It
+; assumes that the given virtual address exists within the kernel's higher half
+; mapping (ie. between 0xffff800000000000 and 0xffff800000200000), and maps
+; this region to physical addresses 0 to 0x200000.
+;
+; We need to use this macro throughout all the kernel's initial 32 bit code
+; before we enable paging, because the linker places all code and relocations
+; at the higher half address 0xffff800000000000, but we can only use physical
+; addresses until we enable paging.
+;
+; See the comment above the page tables below for more information on how paging
+; is set up for the kernel entry.
+%define KERNEL_BASE 0xffff800000000000
+%define VIRTUAL_TO_PHYSICAL(virtual) ((virtual) - 0xffff800000000000)
+
+; Multiboot header, used to identify the kernel as a valid operating system that
+; the bootloader can load.
+section .multiboot
 
 header_start:
 	dd 0xe85250d6                ; Magic number (multiboot 2)
@@ -29,32 +44,35 @@ header_end:
 ; Uninitialised memory
 section .bss
 
+; Align everything in this section to the start of a page, since page tables
+; themselves must be contained within a page.
+align 4096
+
 ; Switching to long mode in x86 requires us to enable paging, so for the kernel
 ; to still work we need to set up some page tables before we switch modes.
 ;
-; Allocate memory for a preliminary set of page tables, used to identity map
-; the kernel so that the code still works after we switch to long mode.
+; This creates the following mappings from virtual address space to physical
+; address space:
+; * 0 to 0x200000 (2 MB) -> 0 to 0x200000
+; * 0xffff800000000000 to 0xffff800000200000 -> 0 to 0x200000
 ;
-; We're going to identity map a 1 GB region of memory starting at 0x0 and
-; finishing at 0x40000000 (1 GB in hex). Normally, x86 uses 4 page tables and a
-; page size of 4096 bytes, but we can map 2 MB pages using only 3 page tables
-; (P4, P3, and P2), and enabling certain bits in the page table entry flags in
-; P2. So we're going to map 1, 2 MB page at 0x0, the next starting at 0x200000
-; (2 MB), the next at 0x400000 (4 MB), and so on...
+; Our OS maps the entire kernel into every process' virtual address space,
+; starting at 0xffff800000000000. Introducing this mapping early simplifies the
+; kernel code.
 ;
-; Page tables need to be aligned on page boundaries, so align this entire
-; section to the size of a page (4096 bytes)
-align 4096
+; For this basic entry mapping, we don't bother setting the correct page flags
+; for the text and rodata sections (ie. everything's writable and exectuable).
+; This comes later, when we re-map the kernel.
 p4_table:
-	resb 4096
+	; Each page table has 512 entries, with each entry being an 8 byte pointer
+	; to another physical address
+	resq 512
 p3_table:
-	resb 4096
+	resq 512
 p2_table:
-	resb 4096
+	resq 512
 
-; Allocate some memory used for the kernel's stack, which we need for register
-; overflow and several CPU feature checks (since `eflags` can only be pushed to
-; the stack)
+; Allocate a page of memory used for the kernel's entry stack.
 stack_bottom:
 	resb 4096
 stack_top:
@@ -100,7 +118,7 @@ gdt_info:
 	dq gdt_start ; Pointer to start of the GDT
 
 
-; Assembly code
+; Actual code
 section .text
 
 ; Prints an error message and error number to the screen and hangs.
@@ -223,48 +241,34 @@ check_long_mode:
 	jmp error
 
 
-; Sets up a series of page tables so that the first 1 GB of virtual memory is
-; identity mapped to the first 1 GB of physical memory.
+; Sets up a series of page tables to fulfill the mappings outlined above.
 setup_page_tables:
 	; By default, GRUB fills all memory in the .bss section with 0s when it
 	; loads the kernel (despite the .bss section typically being uninitialised).
 	; This means all 3 page tables are already valid (containing all 0s), but
 	; aren't very useful to us yet because they don't actually do anything
 
-	; Map the last entry in the P4 table to the P4 table itself (recursive
-	; mapping). This lets us modify the page tables themselves by exploiting
-	; the hardware's address translation process.
-	;
-	; See http://os.phil-opp.com/modifying-page-tables.html#page-table-entries
-	; for a full list of page table entry flags
-	mov eax, p4_table
-	or eax, 11b ; flags: writable, present
-	mov [p4_table + 511 * 8], eax
-
 	; Map the first entry in the P4 table to the P3 table
-	mov eax, p3_table
-	or eax, 11b ; flags: writable, present
-	mov [p4_table], eax
+	; Despite the fact we're using eax and writing only 4 bytes (since we're
+	; still in 32 bit mode), x86 is little endian, so we don't need to offset
+	; the 4 byte write by another 4 bytes to obtain the correct 8 byte pointer.
+	mov eax, VIRTUAL_TO_PHYSICAL(p3_table)
+	or eax, 0b11 ; flags: writable, present
+	mov [VIRTUAL_TO_PHYSICAL(p4_table)], eax
+
+	; Map the 0x100 entry in the P4 table to the P3 table. This means that the
+	; address 0xffff800000000000 (ie. with the highest bit of the 9 bits that
+	; represent the P4 table index set) will map to 0 as well
+	mov [VIRTUAL_TO_PHYSICAL(p4_table) + 0x100 * 8], eax
 
 	; Map the first entry in the P3 table to the P2 table
-	mov eax, p2_table
-	or eax, 11b ; flags: writable, present
-	mov [p3_table], eax
+	mov eax, VIRTUAL_TO_PHYSICAL(p2_table)
+	or eax, 0b11 ; flags: writable, present
+	mov [VIRTUAL_TO_PHYSICAL(p3_table)], eax
 
-	; Use a loop to map the `ecx`th entry in the P2 table to a region of memory
-	; starting at `ecx` * 0x200000 (2 MB) and of size 2 MB (using special
-	; bit flags in the page table entry)
-	mov ecx, 0 ; Use `ecx` as the loop counter
-.set_p2_entry:
-	mov eax, 0x200000 ; 2 MB
-	mul ecx           ; `eax` = `eax` * given register (`ecx`)
-	or eax, 10000011b ; Set the present, writable, and "huge" (2 MB page) flags
-	mov [p2_table + ecx * 8], eax
-
-	; Stop the loop when we've filled all 512 page table entries
-	inc ecx
-	cmp ecx, 512
-	jne .set_p2_entry
+	; Map the first entry in the P2 table to a huge page starting at 0
+	mov eax, 0b10000011
+	mov [VIRTUAL_TO_PHYSICAL(p2_table)], eax
 
 	ret
 
@@ -279,7 +283,7 @@ switch_to_long_mode:
 	; Normally, accessing/modifying the cr3 register in user mode is a
 	; restricted operation, but we're a kernel running in kernel mode so it's
 	; fine
-	mov eax, p4_table
+	mov eax, VIRTUAL_TO_PHYSICAL(p4_table)
 	mov cr3, eax
 
 	; Long mode is part of the "Physical Address Extension" (PAE) x86 CPU
@@ -339,7 +343,7 @@ global start
 start:
 	; Update the stack pointer to point to our empty kernel stack
 	; Use the `stack_top` since the stack has to grow downwards
-	mov esp, stack_top
+	mov esp, VIRTUAL_TO_PHYSICAL(stack_top)
 
 	; We need to use the multiboot information struct (in `ebx`) later in the
 	; kernel to find out some information about where our kernel is located in
@@ -353,7 +357,7 @@ start:
 	call check_cpuid
 	call check_long_mode
 
-	; Setup paging and switch to long mode
+	; Enable paging and switch to long mode
 	call setup_page_tables
 	call switch_to_long_mode
 
@@ -362,7 +366,8 @@ start:
 
 	; Load the 64 bit GDT. GRUB provides a 32 bit one for us, but switching to
 	; long mode requires a 64 bit version, so we have to set up another one
-	lgdt [gdt_info]
+	mov eax, VIRTUAL_TO_PHYSICAL(gdt_info)
+	lgdt [eax]
 
 	; Loading a new GDT doesn't reset all the selector registers used by the
 	; CPU - we have to do this manually
@@ -374,7 +379,7 @@ start:
 	; Finally, we need to update the code selector register with its new value
 	; from the GDT table. We can't modify it through `mov`, we need to use a
 	; far jump or far return
-	jmp gdt_start.code:long_mode
+	jmp gdt_start.code:VIRTUAL_TO_PHYSICAL(long_mode)
 
 
 ; 64 bit code we can run after we've switched to long mode.
@@ -382,6 +387,11 @@ bits 64
 
 ; Called through a far jump after switching to long mode.
 long_mode:
+	; Now that paging is enabled, we can use the virtual address of the kernel
+	; stack
+	mov rax, KERNEL_BASE
+	add rsp, rax
+
 	; Call into the Rust code's main function
 	extern kernel_main
 	call kernel_main

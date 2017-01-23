@@ -18,19 +18,6 @@ const TERM_HEIGHT: usize = 25;
 /// The static Writer used to output characters to the terminal.
 pub static WRITER: Mutex<Writer> = Mutex::new(Writer::vga());
 
-/// A macro to print a format string and arguments to the terminal.
-macro_rules! print {
-    ($($arg:tt)*) => ({
-        $crate::vga::print(format_args!($($arg)*));
-    });
-}
-
-/// Prints a string to the terminal, appending a newline after it.
-macro_rules! println {
-    ($fmt:expr) => (print!(concat!($fmt, "\n")));
-    ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"), $($arg)*));
-}
-
 /// All possible foreground and background colors we can use.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
@@ -230,6 +217,7 @@ impl fmt::Write for Writer {
 	}
 }
 
+
 /// Initialise the VGA module.
 ///
 /// Clears the screen and moves the cursor to the origin.
@@ -239,6 +227,20 @@ pub fn init() {
 	let mut writer = WRITER.lock();
 	writer.clear_screen();
 	writer.set_cursor(0, 0);
+}
+
+
+/// A macro to print a format string and arguments to the terminal.
+macro_rules! print {
+    ($($arg:tt)*) => ({
+        $crate::driver::vga::print(format_args!($($arg)*));
+    });
+}
+
+/// Prints a string to the terminal, appending a newline after it.
+macro_rules! println {
+    ($fmt:expr) => (print!(concat!($fmt, "\n")));
+    ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"), $($arg)*));
 }
 
 /// Prints a series of format arguments to the terminal.
