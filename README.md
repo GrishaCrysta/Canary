@@ -11,7 +11,7 @@ Canary's design goals are:
 
 ## Usage
 
-You can download the latest `.iso` file from the [releases](https://github.com/GravityScore/Canary/releases) page and run it using [VirtualBox](https://www.virtualbox.org/wiki/Downloads) or [QEMU](http://wiki.qemu.org/Main_Page).
+You can download the latest `.iso` file from the [releases](https://github.com/benanders/Canary/releases) page and run it using [VirtualBox](https://www.virtualbox.org/wiki/Downloads) or [QEMU](http://wiki.qemu.org/Main_Page).
 
 For example, using QEMU on an `x86-64` system:
 
@@ -54,7 +54,7 @@ $ rustup component add rust-src
 Next, clone this repository:
 
 ```bash
-$ git clone https://github.com/GravityScore/Canary
+$ git clone https://github.com/benanders/Canary
 $ cd Canary
 ```
 
@@ -88,7 +88,7 @@ $ brew cask install vagrant
 Next, clone this repository:
 
 ```bash
-$ git clone https://github.com/GravityScore/Canary
+$ git clone https://github.com/benanders/Canary
 $ cd Canary
 ```
 
